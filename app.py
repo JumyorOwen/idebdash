@@ -1,142 +1,374 @@
 import streamlit as st
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
+import plotly.express as px
 
-# 1. Configuração da Página
-st.set_page_config(page_title="Painel IDEB - Sergipe em Foco", layout="wide")
-st.title("📊 Painel de Consulta IDEB 2025")
-st.markdown("Acompanhamento estratégico dos indicadores da educação básica.")
+# =====================================================
+# CONFIGURAÇÃO DA PÁGINA
+# =====================================================
+st.set_page_config(
+    page_title="Painel IDEB 2025",
+    page_icon="📚",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# Paleta de cores da Identidade Visual
-COR_SERGIPE = "#002776" # Azul (Destaque principal)
-COR_OUTROS = "#009C3B"  # Verde (Demais estados)
-COR_LINHA = "#FFDF00"   # Amarelo (Evolução histórica)
-COR_FUNDO = "#FFFFFF"
+# =====================================================
+# CSS
+# =====================================================
+st.markdown("""
+<style>
+.main {
+    background: #F5F7FA;
+}
+.block-container {
+    padding-top: 1rem;
+    padding-bottom: 1rem;
+}
+h1 {
+    color: #002776;
+    font-weight: 700;
+}
+h2, h3 {
+    color: #002776;
+}
+[data-testid="stSidebar"] {
+    background: #FFFFFF;
+}
+.kpi {
+    background: white;
+    padding: 20px;
+    border-radius: 12px;
+    box-shadow: 0px 2px 10px rgba(0,0,0,.08);
+    text-align: center;
+}
+.kpi h1 {
+    color: #002776;
+    margin: 0;
+}
+.kpi p {
+    color: #666;
+    margin: 0;
+}
+</style>
+""", unsafe_allow_html=True)
 
-# 2. Carregamento dos Dados (Lendo todas as abas do Excel)
+# =====================================================
+# CORES
+# =====================================================
+AZUL = "#002776"
+VERDE = "#009C3B"
+AMARELO = "#FFDF00"
+CINZA = "#D9D9D9"
+
+# =====================================================
+# CABEÇALHO
+# =====================================================
+st.title("📊 Painel Estratégico IDEB 2025")
+st.caption("Indicadores da Educação Básica • Fonte: INEP 2025")
+
+# =====================================================
+# CARREGAMENTO
+# =====================================================
 @st.cache_data
-def carregar_dados():
-    # O arquivo correto
+def carregar():
     arquivo = "BASE 1 IDEB BRASIL.xlsx"
-    dict_abas = pd.read_excel(arquivo, sheet_name=None)
+    abas = pd.read_excel(arquivo, sheet_name=None)
     
-    dict_tratado = {}
-    nordeste = ['Alagoas', 'Bahia', 'Ceará', 'Maranhão', 'Paraíba', 'Pernambuco', 'Piauí', 'Rio Grande do Norte', 'Sergipe']
+    nordeste = [
+        "Alagoas", "Bahia", "Ceará", "Maranhão", "Paraíba", 
+        "Pernambuco", "Piauí", "Rio Grande do Norte", "Sergipe"
+    ]
     
-    # Tratando cada aba individualmente
-    for nome_aba, df in dict_abas.items():
-        # Renomeia a coluna para padronizar
-        if 'Região/\nUnidade da Federação' in df.columns:
-            df = df.rename(columns={'Região/\nUnidade da Federação': 'Estado'})
-             
-        # Criando a marcação de estados do Nordeste
-        if 'Estado' in df.columns:
-            # Garante que não haja espaços extras nos nomes dos estados
-            df['Estado'] = df['Estado'].str.strip() 
-            df['Regiao_Nordeste'] = df['Estado'].apply(lambda x: 'Sim' if x in nordeste else 'Não')
+    bases = {}
+    
+    for nome, df in abas.items():
+        if "Região/\nUnidade da Federação" in df.columns:
+            df = df.rename(columns={"Região/\nUnidade da Federação": "Estado"})
             
-        dict_tratado[nome_aba] = df
+        if "Estado" not in df.columns:
+            continue
+            
+        df["Estado"] = df["Estado"].astype(str).str.strip()
         
-    return dict_tratado
+        # Normaliza rede
+        if "Rede" in df.columns:
+            df["Rede"] = df["Rede"].astype(str).str.replace(r"\s*\(\d+\)", "", regex=True).str.strip()
+            
+        # Converte todas colunas IDEB
+        colunas_ideb = [c for c in df.columns if "IDEB" in c]
+        for c in colunas_ideb:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+            
+        df["Nordeste"] = df["Estado"].isin(nordeste)
+        bases[nome] = df
+        
+    return bases
 
-# Carrega o dicionário com as bases de cada etapa
-bases = carregar_dados()
-lista_etapas = list(bases.keys())
+bases = carregar()
 
-# 3. Menu Lateral (Filtros)
-# Removendo a imagem da bandeira para evitar problemas de carregamento no Streamlit Cloud, mas você pode adicionar uma imagem local se preferir
-st.sidebar.header("Filtros Estratégicos")
+# =====================================================
+# SIDEBAR
+# =====================================================
+st.sidebar.title("⚙️ Filtros")
 
-# Seleção da aba (Etapa de Ensino) e da Rede
-etapa_selecionada = st.sidebar.selectbox("Etapa de Ensino", lista_etapas)
-df_etapa = bases[etapa_selecionada]
+etapa = st.sidebar.selectbox("Etapa de Ensino", list(bases.keys()))
+df = bases[etapa]
 
-# Verifica se a coluna Rede existe para criar o filtro
-if 'Rede' in df_etapa.columns:
-    redes_disponiveis = df_etapa['Rede'].dropna().unique().tolist()
-    rede_selecionada = st.sidebar.selectbox("Rede de Ensino", redes_disponiveis)
-    df_filtrado = df_etapa[df_etapa['Rede'] == rede_selecionada]
+if "Rede" in df.columns:
+    rede = st.sidebar.selectbox("Rede", sorted(df["Rede"].dropna().unique()))
+    df = df[df["Rede"] == rede]
 else:
-    df_filtrado = df_etapa
+    rede = "Todas"
 
-# 4. Construção das Abas Visuais
-aba1, aba2, aba3 = st.tabs(["🌎 Ranking Nacional (2025)", "☀️ Ranking Nordeste (2025)", "📈 Série Histórica (Sergipe)"])
+st.sidebar.markdown("---")
+st.sidebar.info("**Fonte**\n\nINEP\n\nIDEB 2025")
 
-coluna_foco = 'IDEB 2025'
+# =====================================================
+# IDENTIFICA COLUNA MAIS RECENTE
+# =====================================================
+colunas_ideb = [c for c in df.columns if "IDEB" in c]
+coluna_atual = colunas_ideb[-1]
 
-# Proteção caso a coluna de 2025 não esteja exata
-if coluna_foco not in df_filtrado.columns:
-    colunas_ideb = [col for col in df_filtrado.columns if 'IDEB' in col]
-    if colunas_ideb:
-        coluna_foco = colunas_ideb[-1]
+# =====================================================
+# KPIs E PREPARAÇÃO DO RANKING DOS ESTADOS
+# =====================================================
+sergipe = df[df["Estado"] == "Sergipe"]
 
+# Lista de regiões para excluir da contagem de posição do ranking
+regioes = ["Brasil", "Norte", "Nordeste", "Sudeste", "Sul", "Centro-Oeste"]
+
+# Cria o ranking SOMENTE com os estados (sem regiões) e sem notas nulas
+ranking = (
+    df[~df["Estado"].isin(regioes)]
+    .dropna(subset=[coluna_atual])
+    .sort_values(coluna_atual, ascending=False)
+    .reset_index(drop=True)
+)
+ranking["Posição"] = ranking.index + 1
+
+if not sergipe.empty and pd.notna(sergipe.iloc[0][coluna_atual]):
+    nota = float(sergipe.iloc[0][coluna_atual])
+    
+    try:
+        posicao_br = int(ranking[ranking["Estado"] == "Sergipe"]["Posição"].iloc[0])
+    except IndexError:
+        posicao_br = "-"
+        
+    ranking_ne = ranking[ranking["Nordeste"]].reset_index(drop=True)
+    ranking_ne["Posição"] = ranking_ne.index + 1
+    
+    try:
+        posicao_ne = int(ranking_ne[ranking_ne["Estado"] == "Sergipe"]["Posição"].iloc[0])
+    except IndexError:
+        posicao_ne = "-"
+else:
+    nota = 0
+    posicao_br = "-"
+    posicao_ne = "-"
+
+c1, c2, c3, c4 = st.columns(4)
+with c1:
+    st.metric("IDEB", f"{nota:.1f}" if nota != 0 else "-")
+with c2:
+    st.metric("Ranking Brasil", f"{posicao_br}º" if posicao_br != "-" else "-")
+with c3:
+    st.metric("Ranking Nordeste", f"{posicao_ne}º" if posicao_ne != "-" else "-")
+with c4:
+    st.metric("Rede", rede)
+
+st.divider()
+
+# =====================================================
+# ABAS
+# =====================================================
+aba1, aba2, aba3 = st.tabs(["🇧🇷 Ranking Brasil", "🌵 Ranking Nordeste", "📈 Série Histórica"])
+
+# =====================================================
+# ABA 1 - RANKING BRASIL
+# =====================================================
 with aba1:
-    st.subheader(f"Ranking Nacional - {etapa_selecionada} ({rede_selecionada})")
+    st.subheader(f"🇧🇷 Ranking Nacional • {etapa}")
     
-    # Ordena e remove valores nulos e converte para numérico caso venha como string
-    df_br = df_filtrado.dropna(subset=[coluna_foco]).copy()
-    df_br[coluna_foco] = pd.to_numeric(df_br[coluna_foco], errors='coerce')
-    df_br = df_br.dropna(subset=[coluna_foco]).sort_values(by=coluna_foco, ascending=True)
+    ranking_br = ranking.copy()
+    ranking_br["Label"] = ranking_br["Posição"].astype(str) + "º  " + ranking_br["Estado"]
     
-    # Aplica a cor de destaque apenas em Sergipe
-    cores_br = [COR_SERGIPE if estado == 'Sergipe' else COR_OUTROS for estado in df_br['Estado']]
+    cores = [AZUL if estado == "Sergipe" else "#C9CED6" for estado in ranking_br["Estado"]]
     
-    fig_br = go.Figure(go.Bar(
-        x=df_br[coluna_foco], y=df_br['Estado'], orientation='h',
-        marker_color=cores_br, text=df_br[coluna_foco], textposition='auto'
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=ranking_br[coluna_atual],
+        y=ranking_br["Label"],
+        orientation="h",
+        marker=dict(color=cores),
+        text=ranking_br[coluna_atual].round(1),
+        textposition="outside",
+        hovertemplate="<b>%{y}</b><br>Nota: %{x}<extra></extra>"
     ))
-    fig_br.update_layout(xaxis_title=f"Nota {coluna_foco}", yaxis_title="", template="plotly_white", height=700)
-    st.plotly_chart(fig_br, use_container_width=True)
+    
+    fig.update_layout(
+        template="plotly_white",
+        height=900,
+        margin=dict(l=10, r=20, t=20, b=20),
+        showlegend=False,
+        xaxis_title="Nota IDEB",
+        yaxis_title="",
+        yaxis=dict(autorange="reversed")
+    )
+    st.plotly_chart(fig, use_container_width=True)
+    
+    st.dataframe(
+        ranking_br[["Posição", "Estado", coluna_atual]],
+        use_container_width=True,
+        hide_index=True
+    )
 
+# =====================================================
+# ABA 2 - RANKING NORDESTE
+# =====================================================
 with aba2:
-    st.subheader(f"Ranking Nordeste - {etapa_selecionada} ({rede_selecionada})")
+    st.subheader(f"🌵 Ranking Nordeste • {etapa}")
     
-    df_ne = df_filtrado[df_filtrado['Regiao_Nordeste'] == 'Sim'].dropna(subset=[coluna_foco]).copy()
-    df_ne[coluna_foco] = pd.to_numeric(df_ne[coluna_foco], errors='coerce')
-    df_ne = df_ne.dropna(subset=[coluna_foco]).sort_values(by=coluna_foco, ascending=True)
+    ranking_ne = ranking[ranking["Nordeste"]].reset_index(drop=True)
+    ranking_ne["Posição"] = ranking_ne.index + 1
+    ranking_ne["Label"] = ranking_ne["Posição"].astype(str) + "º  " + ranking_ne["Estado"]
     
-    cores_ne = [COR_SERGIPE if estado == 'Sergipe' else COR_OUTROS for estado in df_ne['Estado']]
+    cores = [AZUL if estado == "Sergipe" else VERDE for estado in ranking_ne["Estado"]]
     
-    fig_ne = go.Figure(go.Bar(
-        x=df_ne[coluna_foco], y=df_ne['Estado'], orientation='h',
-        marker_color=cores_ne, text=df_ne[coluna_foco], textposition='auto'
+    fig2 = go.Figure()
+    fig2.add_trace(go.Bar(
+        x=ranking_ne[coluna_atual],
+        y=ranking_ne["Label"],
+        orientation="h",
+        marker=dict(color=cores),
+        text=ranking_ne[coluna_atual].round(1),
+        textposition="outside",
+        hovertemplate="<b>%{y}</b><br>Nota: %{x}<extra></extra>"
     ))
-    fig_ne.update_layout(xaxis_title=f"Nota {coluna_foco}", yaxis_title="", template="plotly_white", height=500)
-    st.plotly_chart(fig_ne, use_container_width=True)
+    
+    fig2.update_layout(
+        template="plotly_white",
+        height=600,
+        margin=dict(l=10, r=20, t=20, b=20),
+        showlegend=False,
+        xaxis_title="Nota IDEB",
+        yaxis_title="",
+        yaxis=dict(autorange="reversed")
+    )
+    st.plotly_chart(fig2, use_container_width=True)
+    
+    st.dataframe(
+        ranking_ne[["Posição", "Estado", coluna_atual]],
+        use_container_width=True,
+        hide_index=True
+    )
 
+# =====================================================
+# ABA 3 - SÉRIE HISTÓRICA
+# =====================================================
 with aba3:
-    st.subheader(f"Série Histórica do IDEB - Sergipe ({etapa_selecionada} - {rede_selecionada})")
+    st.subheader(f"📈 Evolução do IDEB - Sergipe")
     
-    # Isolando Sergipe
-    df_se = df_filtrado[df_filtrado['Estado'] == 'Sergipe']
-    colunas_anos = [col for col in df_se.columns if 'IDEB' in col]
+    df_se = df[df["Estado"] == "Sergipe"]
     
-    if not df_se.empty and len(colunas_anos) > 0:
-        valores_se = df_se[colunas_anos].iloc[0].values
-        # Limpa o texto das colunas para manter apenas o ano no eixo X
-        anos = [str(col).replace('IDEB', '').strip() for col in colunas_anos]
+    if not df_se.empty:
+        colunas_hist = [c for c in df.columns if "IDEB" in c]
+        anos = [c.replace("IDEB", "").strip() for c in colunas_hist]
+        valores = df_se[colunas_hist].iloc[0].astype(float).values
         
-        # Converte valores para float, substituindo '-' ou nulos por NaN
-        valores_se = pd.to_numeric(valores_se, errors='coerce')
-        
-        fig_hist = go.Figure()
-        
-        # Linha e marcadores
-        fig_hist.add_trace(go.Scatter(
-            x=anos, y=valores_se, mode='lines+markers+text',
-            line=dict(color=COR_SERGIPE, width=4),
-            marker=dict(size=12, color=COR_LINHA, line=dict(width=2, color=COR_SERGIPE)),
-            text=valores_se, textposition='top center',
-            textfont=dict(color=COR_SERGIPE, size=14)
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=anos,
+            y=valores,
+            mode="lines+markers+text",
+            line=dict(color=AZUL, width=5),
+            marker=dict(size=14, color=AMARELO, line=dict(color=AZUL, width=2)),
+            fill="tozeroy",
+            fillcolor="rgba(0,39,118,0.10)",
+            text=[f"{v:.1f}" if pd.notna(v) else "" for v in valores],
+            textposition="top center"
         ))
         
-        fig_hist.update_layout(
-            xaxis_title="Ano", 
-            yaxis_title="Nota IDEB", 
+        fig.update_layout(
             template="plotly_white",
-            height=500
+            height=550,
+            showlegend=False,
+            xaxis_title="Ano",
+            yaxis_title="Nota IDEB",
+            margin=dict(l=20, r=20, t=20, b=20)
         )
-        st.plotly_chart(fig_hist, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True)
     else:
-        st.warning("Dados históricos de Sergipe não encontrados para este filtro.")
+        st.warning("Não existem dados históricos para Sergipe.")
+
+# =====================================================
+# COMPARAÇÃO BRASIL x NORDESTE x SERGIPE
+# =====================================================
+st.divider()
+st.subheader("📊 Comparativo")
+
+comparacao = []
+# Puxa os dados direto do dataframe original `df` que ainda contém as regiões
+for estado in ["Brasil", "Nordeste", "Sergipe"]:
+    temp = df[df["Estado"] == estado]
+    if not temp.empty:
+        comparacao.append(dict(Local=estado, Nota=temp.iloc[0][coluna_atual]))
+
+if len(comparacao) > 0:
+    comp = pd.DataFrame(comparacao)
+    
+    cores = []
+    for x in comp["Local"]:
+        if x == "Sergipe":
+            cores.append(AZUL)
+        elif x == "Nordeste":
+            cores.append(VERDE)
+        else:
+            cores.append("#BFBFBF")
+            
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=comp["Local"],
+        y=comp["Nota"],
+        marker_color=cores,
+        text=comp["Nota"],
+        textposition="outside"
+    ))
+    
+    fig.update_layout(
+        template="plotly_white",
+        height=450,
+        showlegend=False,
+        yaxis_title="Nota IDEB"
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+# =====================================================
+# MELHORES E PIORES
+# =====================================================
+st.divider()
+c1, c2 = st.columns(2)
+
+if not ranking.empty:
+    with c1:
+        melhor = ranking.iloc[0]
+        st.success(f"🏆 **Melhor colocado**\n\n**{melhor['Estado']}**\n\nNota: **{melhor[coluna_atual]:.1f}**")
+    with c2:
+        pior = ranking.iloc[-1]
+        st.error(f"📉 **Último colocado**\n\n**{pior['Estado']}**\n\nNota: **{pior[coluna_atual]:.1f}**")
+
+# =====================================================
+# TABELA COMPLETA
+# =====================================================
+st.divider()
+st.subheader("📋 Base utilizada")
+
+mostrar = st.checkbox("Mostrar tabela completa")
+if mostrar:
+    st.dataframe(ranking, use_container_width=True, hide_index=True)
+
+# =====================================================
+# RODAPÉ
+# =====================================================
+st.divider()
+st.caption("Painel desenvolvido em Streamlit\n\nFonte: INEP • IDEB 2025\n\nAtualização automática da base.")
