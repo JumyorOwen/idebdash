@@ -134,7 +134,7 @@ NOMES_CORRETOS = {
 }
 
 # =====================================================
-# CARREGAMENTO
+# CARREGAMENTO — BASE 1 (ESTADOS / BRASIL)
 # =====================================================
 @st.cache_data
 def carregar():
@@ -178,9 +178,44 @@ except FileNotFoundError:
     st.stop()
 
 # =====================================================
-# SIDEBAR — FILTROS
+# CARREGAMENTO — BASE 2 (MUNICÍPIOS DE SERGIPE)
 # =====================================================
-st.sidebar.title("⚙️ Filtros")
+@st.cache_data
+def carregar_municipios():
+    arquivo = "BASE 2 IDEB BRASIL.xlsx"
+    abas = pd.read_excel(arquivo, sheet_name=None)
+
+    bases_mun = {}
+
+    for nome, df in abas.items():
+        if "Município" not in df.columns:
+            continue
+
+        df["Município"] = df["Município"].astype(str).str.strip()
+
+        if "Rede" in df.columns:
+            df["Rede"] = df["Rede"].astype(str).str.replace(r"\s*\(\d+\)", "", regex=True).str.strip()
+
+        colunas_ideb = [c for c in df.columns if "IDEB" in c]
+        for c in colunas_ideb:
+            df[c] = pd.to_numeric(df[c], errors="coerce")
+
+        bases_mun[nome] = df
+
+    return bases_mun
+
+
+try:
+    bases_mun = carregar_municipios()
+    municipios_ok = True
+except FileNotFoundError:
+    bases_mun = {}
+    municipios_ok = False
+
+# =====================================================
+# SIDEBAR — FILTROS (ANÁLISE POR ESTADO)
+# =====================================================
+st.sidebar.title("⚙️ Filtros • Estados")
 
 etapa = st.sidebar.selectbox("Etapa de Ensino", list(bases.keys()))
 df_completo = bases[etapa]
@@ -205,28 +240,34 @@ coluna_anterior = colunas_ideb[idx_atual - 1] if idx_atual > 0 else None
 st.sidebar.markdown("---")
 st.sidebar.info(f"**Fonte:** INEP\n\n**Etapa:** {etapa}\n\n**Ano:** {ano_ref}")
 
+if not municipios_ok:
+    st.sidebar.warning("⚠️ **BASE 2 IDEB BRASIL.xlsx** não encontrada. A aba de Municípios de Sergipe ficará indisponível.")
+
 # =====================================================
-# RANKINGS
+# RANKINGS (ESTADOS)
 # =====================================================
 regioes = ["Brasil", "Norte", "Nordeste", "Sudeste", "Sul", "Centro-Oeste"]
 
 ESTADO_PRIORIDADE = "Sergipe"
 
 
-def montar_ranking(df_base, coluna_valor):
-    """Ordena por nota (desc). Em caso de empate, ESTADO_PRIORIDADE vem primeiro."""
+def montar_ranking(df_base, coluna_valor, coluna_nome="Estado", prioridade=None):
+    """Ordena por nota (desc). Em caso de empate, 'prioridade' vem primeiro (se informado)."""
     tmp = df_base.dropna(subset=[coluna_valor]).copy()
-    tmp["_prioridade"] = (tmp["Estado"] != ESTADO_PRIORIDADE).astype(int)
-    tmp = tmp.sort_values(
-        by=[coluna_valor, "_prioridade"],
-        ascending=[False, True]
-    ).drop(columns="_prioridade").reset_index(drop=True)
+    if prioridade is not None:
+        tmp["_prioridade"] = (tmp[coluna_nome] != prioridade).astype(int)
+        tmp = tmp.sort_values(
+            by=[coluna_valor, "_prioridade"],
+            ascending=[False, True]
+        ).drop(columns="_prioridade").reset_index(drop=True)
+    else:
+        tmp = tmp.sort_values(by=coluna_valor, ascending=False).reset_index(drop=True)
     tmp["Posição"] = tmp.index + 1
     return tmp
 
 
-ranking = montar_ranking(df[~df["Estado"].isin(regioes)], coluna_atual)
-ranking_ne = montar_ranking(df[(~df["Estado"].isin(regioes)) & (df["Nordeste"])], coluna_atual)
+ranking = montar_ranking(df[~df["Estado"].isin(regioes)], coluna_atual, "Estado", ESTADO_PRIORIDADE)
+ranking_ne = montar_ranking(df[(~df["Estado"].isin(regioes)) & (df["Nordeste"])], coluna_atual, "Estado", ESTADO_PRIORIDADE)
 
 sergipe = df[df["Estado"] == "Sergipe"]
 
@@ -253,7 +294,7 @@ else:
     posicao_ne = None
 
 # =====================================================
-# KPIs
+# KPIs (ESTADOS)
 # =====================================================
 c1, c2, c3, c4 = st.columns(4)
 
@@ -273,11 +314,11 @@ st.divider()
 # =====================================================
 # FUNÇÃO REUTILIZÁVEL — GRÁFICO DE RANKING (BARRAS HORIZONTAIS)
 # =====================================================
-def grafico_ranking(df_rank, coluna_valor, destaque="Sergipe",
+def grafico_ranking(df_rank, coluna_valor, coluna_nome="Estado", destaque="Sergipe",
                      cor_destaque=AZUL, cor_padrao=CINZA, altura=600):
     dados = df_rank.copy()
-    dados["Label"] = dados["Posição"].astype(str) + "º  " + dados["Estado"]
-    cores = [cor_destaque if estado == destaque else cor_padrao for estado in dados["Estado"]]
+    dados["Label"] = dados["Posição"].astype(str) + "º  " + dados[coluna_nome]
+    cores = [cor_destaque if nome_local == destaque else cor_padrao for nome_local in dados[coluna_nome]]
 
     fig = go.Figure()
     fig.add_trace(go.Bar(
@@ -322,24 +363,25 @@ def carregar_geojson():
 # =====================================================
 # ABAS
 # =====================================================
-aba1, aba2, aba3, aba4, aba5 = st.tabs([
+aba1, aba2, aba3, aba4, aba5, aba6 = st.tabs([
     "🇧🇷 Ranking Brasil",
     "🌵 Ranking Nordeste",
     "📈 Série Histórica",
     "🏛️ Comparativo por Rede",
-    "🗺️ Mapa Brasil"
+    "🗺️ Mapa Brasil",
+    "🏙️ Municípios de Sergipe"
 ])
 
 # ---------- ABA 1 ----------
 with aba1:
     st.subheader(f"Ranking Nacional • {etapa} ({rede}) • {ano_ref}")
-    fig = grafico_ranking(ranking, coluna_atual, altura=900)
+    fig = grafico_ranking(ranking, coluna_atual, "Estado", altura=900)
     st.plotly_chart(fig, use_container_width=True)
 
 # ---------- ABA 2 ----------
 with aba2:
     st.subheader(f"Ranking Nordeste • {etapa} ({rede}) • {ano_ref}")
-    fig2 = grafico_ranking(ranking_ne, coluna_atual, cor_padrao=VERDE, altura=600)
+    fig2 = grafico_ranking(ranking_ne, coluna_atual, "Estado", cor_padrao=VERDE, altura=600)
     st.plotly_chart(fig2, use_container_width=True)
 
 # ---------- ABA 3 ----------
@@ -399,7 +441,8 @@ with aba4:
         redes_selecionadas = st.multiselect(
             "Selecione as redes para comparar a evolução histórica:",
             options=redes_disponiveis,
-            default=redes_padrao
+            default=redes_padrao,
+            key="redes_estado"
         )
 
         if redes_selecionadas:
@@ -483,6 +526,247 @@ with aba5:
         )
         st.caption(f"Detalhe técnico: {e}")
 
+# ---------- ABA 6 — MUNICÍPIOS DE SERGIPE ----------
+with aba6:
+    st.subheader("Municípios de Sergipe")
+
+    if not municipios_ok:
+        st.error(
+            "⚠️ Arquivo **BASE 2 IDEB BRASIL.xlsx** não encontrado. "
+            "Coloque-o na mesma pasta do app para habilitar esta análise."
+        )
+    else:
+        # ---------- filtros próprios da aba ----------
+        fc1, fc2, fc3 = st.columns(3)
+
+        with fc1:
+            etapa_mun = st.selectbox("Etapa de Ensino", list(bases_mun.keys()), key="etapa_mun")
+
+        df_mun_completo = bases_mun[etapa_mun]
+
+        with fc2:
+            if "Rede" in df_mun_completo.columns:
+                rede_mun = st.selectbox(
+                    "Rede", sorted(df_mun_completo["Rede"].dropna().unique()), key="rede_mun"
+                )
+                df_mun = df_mun_completo[df_mun_completo["Rede"] == rede_mun]
+            else:
+                rede_mun = "Todas"
+                df_mun = df_mun_completo
+
+        colunas_ideb_mun = [c for c in df_mun.columns if "IDEB" in c]
+        anos_mun = [c.replace("IDEB", "").strip() for c in colunas_ideb_mun]
+
+        with fc3:
+            ano_ref_mun = st.selectbox(
+                "Ano de Referência", anos_mun, index=len(anos_mun) - 1, key="ano_mun"
+            )
+        coluna_atual_mun = colunas_ideb_mun[anos_mun.index(ano_ref_mun)]
+
+        idx_atual_mun = anos_mun.index(ano_ref_mun)
+        coluna_anterior_mun = colunas_ideb_mun[idx_atual_mun - 1] if idx_atual_mun > 0 else None
+
+        municipios_disponiveis = sorted(df_mun["Município"].dropna().unique())
+        municipio_sel = st.selectbox(
+            "Município em destaque",
+            municipios_disponiveis,
+            index=municipios_disponiveis.index("Aracaju") if "Aracaju" in municipios_disponiveis else 0,
+            key="municipio_sel"
+        )
+
+        # ---------- ranking dos municípios ----------
+        ranking_mun = montar_ranking(df_mun, coluna_atual_mun, "Município", municipio_sel)
+
+        alvo = df_mun[df_mun["Município"] == municipio_sel]
+
+        if not alvo.empty and pd.notna(alvo.iloc[0][coluna_atual_mun]):
+            nota_mun = float(alvo.iloc[0][coluna_atual_mun])
+
+            nota_mun_anterior = None
+            if coluna_anterior_mun and pd.notna(alvo.iloc[0][coluna_anterior_mun]):
+                nota_mun_anterior = float(alvo.iloc[0][coluna_anterior_mun])
+
+            try:
+                posicao_mun = int(
+                    ranking_mun.loc[ranking_mun["Município"] == municipio_sel, "Posição"].iloc[0]
+                )
+            except IndexError:
+                posicao_mun = None
+        else:
+            nota_mun = None
+            nota_mun_anterior = None
+            posicao_mun = None
+
+        # ---------- KPIs ----------
+        mc1, mc2, mc3, mc4 = st.columns(4)
+        with mc1:
+            delta_mun = (
+                f"{nota_mun - nota_mun_anterior:+.1f}"
+                if nota_mun is not None and nota_mun_anterior is not None else None
+            )
+            st.metric(f"IDEB {municipio_sel}", f"{nota_mun:.1f}" if nota_mun is not None else "—", delta=delta_mun)
+        with mc2:
+            st.metric("Ranking entre Municípios/SE", f"{posicao_mun}º" if posicao_mun else "—")
+        with mc3:
+            st.metric("Total de Municípios", f"{len(municipios_disponiveis)}")
+        with mc4:
+            st.metric("Rede", rede_mun)
+
+        st.markdown("")
+
+        sub1, sub2, sub3 = st.tabs(["📊 Ranking dos 75 Municípios", "📈 Série Histórica", "🏛️ Comparativo por Rede"])
+
+        # ----- ranking -----
+        with sub1:
+            st.caption(f"{etapa_mun} • {rede_mun} • {ano_ref_mun}")
+            fig_mun_rank = grafico_ranking(
+                ranking_mun, coluna_atual_mun, "Município",
+                destaque=municipio_sel, cor_padrao=CINZA, altura=1400
+            )
+            st.plotly_chart(fig_mun_rank, use_container_width=True)
+
+        # ----- série histórica -----
+        with sub2:
+            st.caption(f"Evolução do IDEB — {municipio_sel} ({rede_mun})")
+
+            if not alvo.empty:
+                valores_mun = alvo[colunas_ideb_mun].iloc[0].astype(float).values
+
+                fig_mun_hist = go.Figure()
+                fig_mun_hist.add_trace(go.Scatter(
+                    x=anos_mun,
+                    y=valores_mun,
+                    mode="lines+markers+text",
+                    line=dict(color=VERDE, width=5, shape="spline"),
+                    marker=dict(size=13, color=AMARELO, line=dict(color=VERDE, width=2)),
+                    fill="tozeroy",
+                    fillcolor="rgba(0,156,59,0.08)",
+                    text=[f"{v:.1f}" if pd.notna(v) else "" for v in valores_mun],
+                    textposition="top center",
+                    textfont=dict(size=13, color=VERDE),
+                    cliponaxis=False
+                ))
+
+                max_val_mun = max([v for v in valores_mun if pd.notna(v)] + [0])
+
+                fig_mun_hist.update_layout(
+                    template="plotly_white",
+                    height=500,
+                    showlegend=False,
+                    font=dict(family="Inter, sans-serif", color=CINZA_ESCURO),
+                    xaxis_title="Ano",
+                    yaxis_title="Nota IDEB",
+                    xaxis=dict(type="category", range=[-0.5, len(anos_mun) - 0.5]),
+                    yaxis=dict(range=[0, max_val_mun + 1.5]),
+                    margin=dict(l=40, r=40, t=30, b=20),
+                    plot_bgcolor="white",
+                    paper_bgcolor="white",
+                )
+                st.plotly_chart(fig_mun_hist, use_container_width=True)
+            else:
+                st.warning(f"Não existem dados históricos para {municipio_sel} nesta rede.")
+
+        # ----- comparativo por rede -----
+        with sub3:
+            st.caption(f"Comparativo de redes em {municipio_sel} • {etapa_mun}")
+
+            df_mun_todas_redes = df_mun_completo[df_mun_completo["Município"] == municipio_sel]
+
+            if not df_mun_todas_redes.empty and "Rede" in df_mun_todas_redes.columns:
+                redes_mun_disponiveis = sorted(df_mun_todas_redes["Rede"].dropna().unique())
+
+                redes_mun_padrao = [
+                    r for r in ["Estadual", "Municipal", "Federal", "Pública"] if r in redes_mun_disponiveis
+                ][:3]
+                if not redes_mun_padrao:
+                    redes_mun_padrao = redes_mun_disponiveis[:2]
+
+                redes_mun_selecionadas = st.multiselect(
+                    "Selecione as redes para comparar a evolução histórica:",
+                    options=redes_mun_disponiveis,
+                    default=redes_mun_padrao,
+                    key="redes_municipio"
+                )
+
+                if redes_mun_selecionadas:
+                    fig_mun_comp = go.Figure()
+                    max_val_mun_comp = 0
+
+                    for i, rede_nome in enumerate(redes_mun_selecionadas):
+                        df_r_mun = df_mun_todas_redes[df_mun_todas_redes["Rede"] == rede_nome]
+                        if df_r_mun.empty:
+                            continue
+
+                        valores_r_mun = df_r_mun[colunas_ideb_mun].iloc[0].astype(float).values
+                        max_local_mun = max([v for v in valores_r_mun if pd.notna(v)] + [0])
+                        max_val_mun_comp = max(max_val_mun_comp, max_local_mun)
+
+                        fig_mun_comp.add_trace(go.Scatter(
+                            x=anos_mun,
+                            y=valores_r_mun,
+                            mode="lines+markers+text",
+                            name=rede_nome,
+                            line=dict(width=4, color=PALETA_REDES[i % len(PALETA_REDES)], shape="spline"),
+                            marker=dict(size=11),
+                            text=[f"{v:.1f}" if pd.notna(v) else "" for v in valores_r_mun],
+                            textposition="top center",
+                            cliponaxis=False
+                        ))
+
+                    fig_mun_comp.update_layout(
+                        template="plotly_white",
+                        height=500,
+                        font=dict(family="Inter, sans-serif", color=CINZA_ESCURO),
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                        xaxis_title="Ano",
+                        yaxis_title="Nota IDEB",
+                        xaxis=dict(type="category", range=[-0.5, len(anos_mun) - 0.5]),
+                        yaxis=dict(range=[0, max_val_mun_comp + 1.5]),
+                        margin=dict(l=40, r=40, t=60, b=20),
+                        plot_bgcolor="white",
+                        paper_bgcolor="white",
+                    )
+                    st.plotly_chart(fig_mun_comp, use_container_width=True)
+                else:
+                    st.info("Selecione pelo menos uma rede acima para visualizar o comparativo.")
+            else:
+                st.warning(f"Não há dados de diferentes redes para {municipio_sel} nesta base.")
+
+        # ---------- melhores e piores municípios ----------
+        st.divider()
+        cm1, cm2 = st.columns(2)
+
+        if not ranking_mun.empty:
+            with cm1:
+                melhor_mun = ranking_mun.iloc[0]
+                st.success(
+                    f"🏆 **Melhor colocado ({rede_mun})**\n\n"
+                    f"**{melhor_mun['Município']}**  •  Nota: **{melhor_mun[coluna_atual_mun]:.1f}**"
+                )
+            with cm2:
+                pior_mun = ranking_mun.iloc[-1]
+                st.error(
+                    f"📉 **Último colocado ({rede_mun})**\n\n"
+                    f"**{pior_mun['Município']}**  •  Nota: **{pior_mun[coluna_atual_mun]:.1f}**"
+                )
+
+        # ---------- tabela completa + download ----------
+        st.divider()
+        st.subheader("📋 Base de Municípios utilizada")
+
+        mostrar_mun = st.checkbox("Mostrar tabela completa dos municípios", key="mostrar_mun")
+        if mostrar_mun:
+            st.dataframe(ranking_mun, use_container_width=True, hide_index=True)
+
+            csv_mun = ranking_mun.to_csv(index=False).encode("utf-8-sig")
+            st.download_button(
+                "⬇️ Baixar tabela (CSV)",
+                data=csv_mun,
+                file_name=f"ideb_municipios_se_{etapa_mun}_{rede_mun}_{ano_ref_mun}.csv".replace(" ", "_"),
+                mime="text/csv",
+                key="download_mun"
+            )
+
 # =====================================================
 # COMPARATIVO CONSOLIDADO — BRASIL x NORDESTE x SERGIPE
 # =====================================================
@@ -521,7 +805,7 @@ if comparacao:
     st.plotly_chart(fig5, use_container_width=True)
 
 # =====================================================
-# MELHORES E PIORES
+# MELHORES E PIORES (ESTADOS)
 # =====================================================
 st.divider()
 c1, c2 = st.columns(2)
@@ -535,7 +819,7 @@ if not ranking.empty:
         st.error(f"📉 **Último colocado ({rede})**\n\n**{pior['Estado']}**  •  Nota: **{pior[coluna_atual]:.1f}**")
 
 # =====================================================
-# TABELA COMPLETA + DOWNLOAD
+# TABELA COMPLETA + DOWNLOAD (ESTADOS)
 # =====================================================
 st.divider()
 st.subheader("📋 Base utilizada")
