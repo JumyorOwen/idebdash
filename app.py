@@ -193,16 +193,23 @@ st.sidebar.info(f"**Fonte:** INEP\n\n**Etapa:** {etapa}\n\n**Ano:** {ano_ref}")
 # =====================================================
 regioes = ["Brasil", "Norte", "Nordeste", "Sudeste", "Sul", "Centro-Oeste"]
 
-ranking = (
-    df[~df["Estado"].isin(regioes)]
-    .dropna(subset=[coluna_atual])
-    .sort_values(coluna_atual, ascending=False)
-    .reset_index(drop=True)
-)
-ranking["Posição"] = ranking.index + 1
+ESTADO_PRIORIDADE = "Sergipe"
 
-ranking_ne = ranking[ranking["Nordeste"]].reset_index(drop=True)
-ranking_ne["Posição"] = ranking_ne.index + 1
+
+def montar_ranking(df_base, coluna_valor):
+    """Ordena por nota (desc). Em caso de empate, ESTADO_PRIORIDADE vem primeiro."""
+    tmp = df_base.dropna(subset=[coluna_valor]).copy()
+    tmp["_prioridade"] = (tmp["Estado"] != ESTADO_PRIORIDADE).astype(int)
+    tmp = tmp.sort_values(
+        by=[coluna_valor, "_prioridade"],
+        ascending=[False, True]
+    ).drop(columns="_prioridade").reset_index(drop=True)
+    tmp["Posição"] = tmp.index + 1
+    return tmp
+
+
+ranking = montar_ranking(df[~df["Estado"].isin(regioes)], coluna_atual)
+ranking_ne = montar_ranking(df[(~df["Estado"].isin(regioes)) & (df["Nordeste"])], coluna_atual)
 
 sergipe = df[df["Estado"] == "Sergipe"]
 
