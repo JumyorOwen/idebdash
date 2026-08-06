@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
+import plotly.express as px
 
 # =====================================================
 # CONFIGURAÇÃO DA PÁGINA
@@ -118,6 +119,21 @@ with col_titulo:
 st.divider()
 
 # =====================================================
+# NOMES DE ESTADOS — CORREÇÃO DE ABREVIAÇÕES
+# =====================================================
+NOMES_CORRETOS = {
+    "R. G. do Norte": "Rio Grande do Norte",
+    "R.G. do Norte": "Rio Grande do Norte",
+    "RG do Norte": "Rio Grande do Norte",
+    "R. G. do Sul": "Rio Grande do Sul",
+    "R.G. do Sul": "Rio Grande do Sul",
+    "RG do Sul": "Rio Grande do Sul",
+    "M. G. do Sul": "Mato Grosso do Sul",
+    "M.G. do Sul": "Mato Grosso do Sul",
+    "MG do Sul": "Mato Grosso do Sul",
+}
+
+# =====================================================
 # CARREGAMENTO
 # =====================================================
 @st.cache_data
@@ -140,6 +156,7 @@ def carregar():
             continue
 
         df["Estado"] = df["Estado"].astype(str).str.strip()
+        df["Estado"] = df["Estado"].replace(NOMES_CORRETOS)
 
         if "Rede" in df.columns:
             df["Rede"] = df["Rede"].astype(str).str.replace(r"\s*\(\d+\)", "", regex=True).str.strip()
@@ -289,13 +306,28 @@ def grafico_ranking(df_rank, coluna_valor, destaque="Sergipe",
 
 
 # =====================================================
+# GEOJSON — CONTORNO DOS ESTADOS (PARA O MAPA)
+# =====================================================
+GEOJSON_URL = "https://raw.githubusercontent.com/codeforamerica/click_that_hood/master/public/data/brazil-states.geojson"
+
+
+@st.cache_data
+def carregar_geojson():
+    import requests
+    resposta = requests.get(GEOJSON_URL, timeout=15)
+    resposta.raise_for_status()
+    return resposta.json()
+
+
+# =====================================================
 # ABAS
 # =====================================================
-aba1, aba2, aba3, aba4 = st.tabs([
+aba1, aba2, aba3, aba4, aba5 = st.tabs([
     "🇧🇷 Ranking Brasil",
     "🌵 Ranking Nordeste",
     "📈 Série Histórica",
-    "🏛️ Comparativo por Rede"
+    "🏛️ Comparativo por Rede",
+    "🗺️ Mapa Brasil"
 ])
 
 # ---------- ABA 1 ----------
@@ -413,6 +445,43 @@ with aba4:
             st.info("Selecione pelo menos uma rede acima para visualizar o comparativo.")
     else:
         st.warning("Não há dados de diferentes redes para Sergipe nesta base.")
+
+# ---------- ABA 5 — MAPA ----------
+with aba5:
+    st.subheader(f"Mapa do Brasil • {etapa} ({rede}) • {ano_ref}")
+
+    df_mapa = ranking.copy()  # já são só estados (sem regiões/Brasil), com nomes completos
+
+    try:
+        geojson = carregar_geojson()
+
+        fig6 = px.choropleth(
+            df_mapa,
+            geojson=geojson,
+            locations="Estado",
+            featureidkey="properties.name",
+            color=coluna_atual,
+            color_continuous_scale=[CINZA, AZUL_CLARO, AZUL],
+            hover_name="Estado",
+            hover_data={coluna_atual: ":.1f", "Posição": True, "Estado": False},
+        )
+        fig6.update_traces(marker_line_color="white", marker_line_width=0.8)
+        fig6.update_geos(fitbounds="locations", visible=False)
+        fig6.update_layout(
+            template="plotly_white",
+            height=650,
+            margin=dict(l=0, r=0, t=10, b=0),
+            font=dict(family="Inter, sans-serif", color=CINZA_ESCURO),
+            coloraxis_colorbar=dict(title="Nota IDEB"),
+        )
+        st.plotly_chart(fig6, use_container_width=True)
+        st.caption("Passe o mouse sobre um estado para ver a nota e a posição no ranking.")
+    except Exception as e:
+        st.warning(
+            "⚠️ Não foi possível carregar o contorno geográfico dos estados "
+            "(é necessária conexão com a internet na primeira execução)."
+        )
+        st.caption(f"Detalhe técnico: {e}")
 
 # =====================================================
 # COMPARATIVO CONSOLIDADO — BRASIL x NORDESTE x SERGIPE
