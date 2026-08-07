@@ -537,6 +537,69 @@ def grafico_comparativo_redes(anos, series_por_rede):
     return fig
 
 
+def calcular_decomposicao_ideb(ideb_2023, ideb_2025, n_2023, n_2025, p_2025):
+    """
+    Decompõe a variação do IDEB 2023->2025 em contribuição da aprendizagem (nota SAEB
+    padronizada, N) e da aprovação/rendimento (P), pelo método do ponto médio:
+
+        contribuição aprendizagem = ΔN × média(P_2023, P_2025)
+        contribuição aprovação    = ΔP × média(N_2023, N_2025)
+
+    Como só temos o indicador de rendimento (P) publicado para 2025 (coluna FLUXO 2025),
+    o P de 2023 é derivado algebricamente a partir do próprio IDEB: P_2023 = IDEB_2023 / N_2023
+    (já que IDEB = N × P). Retorna None se faltar algum dado necessário.
+    """
+    valores = [ideb_2023, ideb_2025, n_2023, n_2025, p_2025]
+    if any(pd.isna(v) for v in valores) or n_2023 in (0, None) or n_2025 in (0, None):
+        return None
+
+    p_2023 = ideb_2023 / n_2023
+    p_2025_frac = p_2025  # já vem como fração (0-1)
+
+    delta_n = n_2025 - n_2023
+    delta_p = p_2025_frac - p_2023
+    delta_ideb = ideb_2025 - ideb_2023
+
+    contrib_aprendizagem = delta_n * ((p_2023 + p_2025_frac) / 2)
+    contrib_aprovacao = delta_p * ((n_2023 + n_2025) / 2)
+
+    return {
+        "ideb_2023": ideb_2023, "ideb_2025": ideb_2025, "delta_ideb": delta_ideb,
+        "n_2023": n_2023, "n_2025": n_2025, "delta_n": delta_n,
+        "p_2023": p_2023, "p_2025": p_2025_frac, "delta_p": delta_p,
+        "contrib_aprendizagem": contrib_aprendizagem,
+        "contrib_aprovacao": contrib_aprovacao,
+    }
+
+
+def frase_decomposicao(d):
+    """Gera uma frase curta descrevendo de onde veio a variação do IDEB, seguindo a mesma
+    lógica de proporções (não limites estatísticos) usada em análises desse tipo."""
+    delta = d["delta_ideb"]
+    if abs(delta) < 0.03:
+        return "O IDEB ficou praticamente estável entre 2023 e 2025."
+
+    total_abs = abs(d["contrib_aprendizagem"]) + abs(d["contrib_aprovacao"])
+    if total_abs == 0:
+        return "Não foi possível separar a contribuição de cada componente."
+
+    peso_aprendizagem = abs(d["contrib_aprendizagem"]) / total_abs
+    sentido = "subiu" if delta > 0 else "caiu"
+
+    if peso_aprendizagem >= 0.8:
+        motivo = "quase todo por aprendizagem"
+    elif peso_aprendizagem >= 0.58:
+        motivo = "principalmente por aprendizagem"
+    elif peso_aprendizagem <= 0.20:
+        motivo = "quase todo por aprovação"
+    elif peso_aprendizagem <= 0.42:
+        motivo = "principalmente por aprovação"
+    else:
+        motivo = "em proporções parecidas entre aprendizagem e aprovação"
+
+    return f"O IDEB {sentido} {delta:+.2f} ponto entre 2023 e 2025, {motivo}."
+
+
 def melhor_pior(ranking_df, coluna_valor, coluna_nome, rotulo):
     c1, c2 = st.columns(2)
     if not ranking_df.empty:
@@ -960,8 +1023,9 @@ with tab_escola:
 
             st.markdown("")
 
-            esub1, esub2, esub3, esub4 = st.tabs([
-                "📊 Ranking de Escolas", "📈 Evolução Histórica", "🧮 Desempenho SAEB", "🔁 Fluxo Escolar"
+            esub1, esub2, esub3, esub4, esub5 = st.tabs([
+                "📊 Ranking de Escolas", "📈 Evolução Histórica", "🧮 Desempenho SAEB", "🔁 Fluxo Escolar",
+                "🔬 Aprendizagem x Aprovação"
             ])
 
             with esub1:
@@ -1040,6 +1104,72 @@ with tab_escola:
                     st.caption("O índice de fluxo mede a proporção de aprovação/progressão dos estudantes, componente P do cálculo do IDEB.")
                 else:
                     st.info("Não há dado de fluxo 2025 disponível para esta escola.")
+
+            with esub5:
+                st.caption(f"De onde veio a variação do IDEB (2023 → 2025) — {escola_foco}")
+
+                n_2023 = alvo_esc.iloc[0].get("NOTA SAEB 2023 -Nota Média Padronizada (N)") if not alvo_esc.empty else None
+                n_2025 = alvo_esc.iloc[0].get("NOTA SAEB 2025 - Nota Média Padronizada (N)") if not alvo_esc.empty else None
+                ideb_2023_esc = alvo_esc.iloc[0].get("IDEB 2023") if not alvo_esc.empty else None
+                ideb_2025_esc = alvo_esc.iloc[0].get("IDEB 2025") if not alvo_esc.empty else None
+
+                decomp = calcular_decomposicao_ideb(ideb_2023_esc, ideb_2025_esc, n_2023, n_2025, fluxo_2025)
+
+                if decomp is None:
+                    st.info(
+                        "Não há dados suficientes (IDEB 2023/2025, nota SAEB padronizada 2023/2025 e "
+                        "fluxo 2025) para decompor a variação desta escola."
+                    )
+                else:
+                    st.info(f"💡 {frase_decomposicao(decomp)}")
+
+                    dc1, dc2, dc3 = st.columns(3)
+                    with dc1:
+                        st.metric("📐 Variação do IDEB", f"{decomp['delta_ideb']:+.2f}")
+                    with dc2:
+                        st.metric("📖 Contrib. Aprendizagem", f"{decomp['contrib_aprendizagem']:+.2f}")
+                    with dc3:
+                        st.metric("✅ Contrib. Aprovação", f"{decomp['contrib_aprovacao']:+.2f}")
+
+                    fig_decomp = go.Figure()
+                    fig_decomp.add_trace(go.Bar(
+                        x=["Aprendizagem\n(nota SAEB)", "Aprovação\n(rendimento)"],
+                        y=[decomp["contrib_aprendizagem"], decomp["contrib_aprovacao"]],
+                        marker=dict(color=[AZUL_CLARO, VERDE]),
+                        text=[f"{v:+.2f}" for v in [decomp["contrib_aprendizagem"], decomp["contrib_aprovacao"]]],
+                        textposition="outside",
+                        textfont=dict(size=14, color=CINZA_ESCURO)
+                    ))
+                    fig_decomp.add_hline(y=0, line_color=CINZA, line_width=1)
+                    fig_decomp.update_layout(
+                        template="plotly_white", height=420, showlegend=False,
+                        font=dict(family="Inter, sans-serif", color=CINZA_ESCURO),
+                        yaxis_title="Contribuição em pontos de IDEB",
+                        plot_bgcolor="white", paper_bgcolor="white",
+                        margin=dict(l=20, r=20, t=30, b=20)
+                    )
+                    st.plotly_chart(fig_decomp, use_container_width=True)
+
+                    with st.expander("Como essa conta é feita"):
+                        st.markdown(f"""
+O IDEB é o produto de dois componentes: **N** (nota média padronizada do SAEB, de 0 a 10) e
+**P** (indicador de rendimento/aprovação). Como só temos o **P** publicado para 2025 (Fluxo 2025),
+o **P** de 2023 foi calculado como `IDEB 2023 ÷ N 2023`.
+
+A partir daí, a variação do IDEB é dividida pelo método do ponto médio:
+
+- Contribuição da aprendizagem = ΔN × média(P 2023, P 2025)
+- Contribuição da aprovação = ΔP × média(N 2023, N 2025)
+
+|  | 2023 | 2025 |
+|---|---|---|
+| Nota SAEB (N) | {n_2023:.2f} | {n_2025:.2f} |
+| Rendimento (P) | {decomp['p_2023']:.3f} | {decomp['p_2025']:.3f} |
+| IDEB | {ideb_2023_esc:.1f} | {ideb_2025_esc:.1f} |
+
+*É uma decomposição contábil, não causal — mostra quanto do movimento do índice corresponde
+matematicamente a cada componente, não o que causou a mudança.*
+""")
 
             st.divider()
             melhor_pior(ranking_esc, coluna_atual_esc, "Escola", f"{municipio_sel} • {etapa}")
