@@ -86,20 +86,25 @@ h2, h3 {{
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }}
-[data-testid="stSidebar"] [data-baseweb="select"] > div {{
-    background: {SIDEBAR_CARD} !important;
-    border: 1px solid #262E52 !important;
+[data-testid="stSidebar"] [data-testid="stSelectbox"] div[data-baseweb="select"] {{
+    background-color: {SIDEBAR_CARD} !important;
+    border: 1px solid #2B355E !important;
     border-radius: 10px !important;
 }}
-[data-testid="stSidebar"] [data-baseweb="select"] * {{
+[data-testid="stSidebar"] [data-testid="stSelectbox"] div[data-baseweb="select"] * {{
+    background-color: transparent !important;
     color: {SIDEBAR_TEXT} !important;
+    -webkit-text-fill-color: {SIDEBAR_TEXT} !important;
 }}
-[data-testid="stSidebar"] [data-baseweb="select"] svg {{
+[data-testid="stSidebar"] [data-testid="stSelectbox"] div[data-baseweb="select"] svg {{
     fill: {SIDEBAR_TEXT} !important;
 }}
 /* Lista de opções do dropdown é renderizada fora da sidebar (portal) */
 [data-baseweb="popover"] li {{
-    color: #1E293B;
+    color: #1E293B !important;
+}}
+[data-baseweb="popover"] li:hover {{
+    background-color: #EAF0FF !important;
 }}
 [data-testid="stSidebar"] .stAlert {{
     background: {SIDEBAR_CARD} !important;
