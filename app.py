@@ -1,4 +1,5 @@
 import re
+import unicodedata
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
@@ -85,10 +86,20 @@ h2, h3 {{
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }}
-[data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] > div {{
+[data-testid="stSidebar"] [data-baseweb="select"] > div {{
     background: {SIDEBAR_CARD} !important;
     border: 1px solid #262E52 !important;
     border-radius: 10px !important;
+}}
+[data-testid="stSidebar"] [data-baseweb="select"] * {{
+    color: {SIDEBAR_TEXT} !important;
+}}
+[data-testid="stSidebar"] [data-baseweb="select"] svg {{
+    fill: {SIDEBAR_TEXT} !important;
+}}
+/* Lista de opções do dropdown é renderizada fora da sidebar (portal) */
+[data-baseweb="popover"] li {{
+    color: #1E293B;
 }}
 [data-testid="stSidebar"] .stAlert {{
     background: {SIDEBAR_CARD} !important;
@@ -166,6 +177,12 @@ div[data-testid="stMetricLabel"] {{
 div[data-testid="stMetricValue"] {{
     color: {AZUL};
     font-weight: 800;
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: unset !important;
+    font-size: 1.5rem !important;
+    line-height: 1.25 !important;
+    word-break: break-word;
 }}
 
 /* ---------- TABS (estilo "pill") ---------- */
@@ -263,6 +280,23 @@ def coluna_para_ano(colunas_ideb, anos, ano_desejado):
     if ano_desejado in anos:
         return colunas_ideb[anos.index(ano_desejado)]
     return colunas_ideb[-1] if colunas_ideb else None
+
+
+def normalizar_chave(s):
+    """Maiúsculas e sem acento, para casar nomes de abas mesmo com pequenas diferenças entre as bases
+    (ex.: 'ENSINO MÉDIO' vs 'ENSINO MEDIO')."""
+    s = str(s).strip().upper()
+    s = "".join(c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c))
+    return s
+
+
+def obter_aba_normalizada(bases_dict, chave_referencia):
+    """Busca a aba correspondente em bases_dict cujo nome normalizado bate com chave_referencia."""
+    alvo = normalizar_chave(chave_referencia)
+    for k, v in bases_dict.items():
+        if normalizar_chave(k) == alvo:
+            return v
+    return None
 
 
 # =====================================================
@@ -574,14 +608,14 @@ with st.sidebar:
     municipio_sel = None
     escola_sel = None
 
-    if municipios_ok and etapa in bases_mun:
-        df_mun_side = bases_mun[etapa]
+    df_mun_side = obter_aba_normalizada(bases_mun, etapa) if municipios_ok else None
+    if df_mun_side is not None:
         municipios_disponiveis = sorted(df_mun_side["Município"].dropna().unique())
         idx_padrao = municipios_disponiveis.index("Aracaju") if "Aracaju" in municipios_disponiveis else 0
         municipio_sel = st.selectbox("Município em destaque", municipios_disponiveis, index=idx_padrao)
 
-    if escolas_ok and etapa in bases_esc and municipio_sel is not None:
-        df_esc_side = bases_esc[etapa]
+    df_esc_side = obter_aba_normalizada(bases_esc, etapa) if escolas_ok else None
+    if df_esc_side is not None and municipio_sel is not None:
         escolas_municipio = sorted(df_esc_side[df_esc_side["Município"] == municipio_sel]["Escola"].dropna().unique())
         if escolas_municipio:
             escola_sel = st.selectbox("Escola em destaque", escolas_municipio)
@@ -745,13 +779,13 @@ with tab_estado:
 # TAB 2 — RAIO-X MUNICIPAL (BASE 2)
 # =====================================================
 with tab_municipio:
+    df_mun_completo = obter_aba_normalizada(bases_mun, etapa) if municipios_ok else None
+
     if not municipios_ok:
         st.error("⚠️ Arquivo **BASE 2 IDEB BRASIL.xlsx** não encontrado. Coloque-o na mesma pasta do app.")
-    elif etapa not in bases_mun:
+    elif df_mun_completo is None:
         st.warning(f"Não há dados de municípios para a etapa **{etapa}**.")
     else:
-        df_mun_completo = bases_mun[etapa]
-
         if "Rede" in df_mun_completo.columns:
             rede_mun = st.selectbox("Rede", sorted(df_mun_completo["Rede"].dropna().unique()), key="rede_mun_sel")
             df_mun = df_mun_completo[df_mun_completo["Rede"] == rede_mun]
@@ -863,14 +897,15 @@ with tab_municipio:
 # TAB 3 — PERFIL DA ESCOLA (BASE 3)
 # =====================================================
 with tab_escola:
+    df_esc_etapa = obter_aba_normalizada(bases_esc, etapa) if escolas_ok else None
+
     if not escolas_ok:
         st.error("⚠️ Arquivo **BASE ESCOLAS.xlsx** não encontrado. Coloque-o na mesma pasta do app.")
-    elif etapa not in bases_esc:
+    elif df_esc_etapa is None:
         st.warning(f"Não há dados de escolas para a etapa **{etapa}**.")
     elif municipio_sel is None:
         st.info("Selecione um município na barra lateral para ver o raio-x das escolas.")
     else:
-        df_esc_etapa = bases_esc[etapa]
         df_esc_municipio = df_esc_etapa[df_esc_etapa["Município"] == municipio_sel]
 
         if df_esc_municipio.empty:
@@ -903,18 +938,20 @@ with tab_escola:
             saeb_port_2025 = alvo_esc.iloc[0].get("NOTA SAEB 2025 - Língua Portuguesa") if not alvo_esc.empty else None
             fluxo_2025 = alvo_esc.iloc[0].get("FLUXO 2025") if not alvo_esc.empty else None
 
-            ec1, ec2, ec3, ec4, ec5 = st.columns(5)
+            ec1, ec2, ec3 = st.columns(3)
             with ec1:
                 delta_esc = f"{nota_esc - nota_esc_anterior:+.1f}" if nota_esc is not None and nota_esc_anterior is not None else None
                 st.metric("🎯 IDEB da Escola", f"{nota_esc:.1f}" if nota_esc is not None else "—", delta=delta_esc)
             with ec2:
                 st.metric("📊 Ranking no Município", f"{posicao_esc}º" if posicao_esc else "—")
             with ec3:
-                st.metric("🔢 Matemática (SAEB 2025)", f"{saeb_mat_2025:.1f}" if pd.notna(saeb_mat_2025) else "—")
-            with ec4:
-                st.metric("📚 Português (SAEB 2025)", f"{saeb_port_2025:.1f}" if pd.notna(saeb_port_2025) else "—")
-            with ec5:
                 st.metric("🏛️ Rede", rede_escola)
+
+            ec4, ec5 = st.columns(2)
+            with ec4:
+                st.metric("🔢 Matemática (SAEB 2025)", f"{saeb_mat_2025:.1f}" if pd.notna(saeb_mat_2025) else "—")
+            with ec5:
+                st.metric("📚 Português (SAEB 2025)", f"{saeb_port_2025:.1f}" if pd.notna(saeb_port_2025) else "—")
 
             st.markdown("")
 
