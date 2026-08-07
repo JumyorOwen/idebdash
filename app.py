@@ -86,18 +86,46 @@ h2, h3 {{
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }}
+/* ---------- SELECTBOX DA SIDEBAR ---------- */
+
 [data-testid="stSidebar"] [data-testid="stSelectbox"] div[data-baseweb="select"] {{
-    background-color: {SIDEBAR_CARD} !important;
-    border: 1px solid #2B355E !important;
+    background-color: #FFFFFF !important;
+    border: 1px solid #CBD5E1 !important;
     border-radius: 10px !important;
+    min-height: 42px !important;
 }}
-[data-testid="stSidebar"] [data-testid="stSelectbox"] div[data-baseweb="select"] * {{
-    background-color: transparent !important;
-    color: {SIDEBAR_TEXT} !important;
-    -webkit-text-fill-color: {SIDEBAR_TEXT} !important;
+
+/* Texto selecionado */
+[data-testid="stSidebar"] [data-testid="stSelectbox"] div[data-baseweb="select"] > div {{
+    background-color: #FFFFFF !important;
+    color: #0F172A !important;
 }}
+
+/* Texto e elementos internos */
+[data-testid="stSidebar"] [data-testid="stSelectbox"] div[data-baseweb="select"] span,
+[data-testid="stSidebar"] [data-testid="stSelectbox"] div[data-baseweb="select"] input,
+[data-testid="stSidebar"] [data-testid="stSelectbox"] div[data-baseweb="select"] div {{
+    color: #0F172A !important;
+    -webkit-text-fill-color: #0F172A !important;
+}}
+
+/* Texto selecionado em destaque */
+[data-testid="stSidebar"] [data-testid="stSelectbox"] div[data-baseweb="select"] [aria-selected="true"] {{
+    color: #0F172A !important;
+    font-weight: 600 !important;
+}}
+
+/* Seta do selectbox */
 [data-testid="stSidebar"] [data-testid="stSelectbox"] div[data-baseweb="select"] svg {{
-    fill: {SIDEBAR_TEXT} !important;
+    fill: #475569 !important;
+    color: #475569 !important;
+}}
+[data-testid="stSidebar"] label {{
+    color: #E7EAF6 !important;
+    font-weight: 700 !important;
+    font-size: 0.82rem !important;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
 }}
 /* Lista de opções do dropdown é renderizada fora da sidebar (portal) */
 [data-baseweb="popover"] li {{
